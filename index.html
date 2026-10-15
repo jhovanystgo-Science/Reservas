@@ -271,9 +271,9 @@ const normPhone = v => { let n = String(v).replace(/\D/g, ''); if (n.length === 
 function waMessage(r) {
   return [
     `🧁 *${CONFIG.BRAND}*`,
-    `✅ *Confirmación de apartado* · Folio ${String(r.folio).padStart(4, '0')}`,
+    `\u2705 *Confirmación de apartado* \u00b7 Folio ${String(r.folio).padStart(4, '0')}`,
     ``,
-    `Hola ${r.cliente.split(' ')[0]} 👋 tu fecha quedó apartada:`,
+    `Hola ${r.cliente.split(' ')[0]} \u{1f44b} tu fecha quedó apartada:`,
     ``,
     `📅 *Fecha:* ${longDate(r.fecha)}`,
     `🕒 *Hora:* ${fmtHora(r.hora)}`,
@@ -285,7 +285,7 @@ function waMessage(r) {
     ``,
     `💰 *Anticipo recibido:* ${money(r.anticipo)} (${r.metodo_pago})`,
     ``,
-    `Gracias por confiar en nosotros 💖`,
+    `Gracias por confiar en nosotros \u{1f496}`,
     `Atendió: ${r.vendedor_nombre}`
   ].join('\n');
 }
