@@ -71,8 +71,11 @@ body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%
     <div id="slots" class="hidden">
       <div class="text-xs opacity-60">Fecha del evento</div>
       <div id="slotsFecha" class="serif text-xl font-bold capitalize"></div>
-      <p class="text-sm mt-2 mb-3">Elige el horario del evento (cada horario se aparta por separado):</p>
+      <div id="slotsCount" class="text-xs opacity-70 mt-1"></div>
+      <p class="text-sm mt-3 mb-2">Horarios ya ocupados este d&#xED;a:</p>
       <div id="slotsGrid" class="grid grid-cols-2 gap-2"></div>
+      <div class="f mt-4"><label>Hora del evento</label><input id="horaSel" type="time"></div>
+      <button id="horaOk" type="button" class="btn pri w-full mt-3">Continuar con este horario</button>
     </div>
     <form id="form" class="f hidden" autocomplete="off">
       <div class="flex justify-between items-start">
@@ -121,6 +124,7 @@ const CONFIG = {
   BRAND: 'Le Tulipe',          // nombre en nota y WhatsApp
   CC: '52',                    // lada por defecto si el celular trae 10 digitos
   WA_EMOJIS: true,             // false = mensaje de WhatsApp sin emojis (texto plano)
+  MAX_POR_DIA: 6,              // maximo de eventos por dia (igual que en la base de datos)
   RECORDAR_SESION: true,       // true = no pide contrase\u00F1a en ese navegador; false = la pide al cerrar el navegador
   LOCK_MIN: 5,                 // minutos de bloqueo temporal (igual que schema.sql)
   SUPABASE_URL: 'https://abyjhgviizbfmnufysex.supabase.co',            // Project URL de Supabase (Project Settings > API)
@@ -154,8 +158,8 @@ const SB = {
     return this.user(data.user);
   },
   async load() {
-    const [r, l, h] = await Promise.all([this.c.from('reservas').select('*'), this.c.from('bloqueos').select('*'), this.c.from('horarios').select('hora').order('hora')]);
-    return { reservas: r.data || [], locks: l.data || [], slots: (h.data || []).map(x => String(x.hora).slice(0, 5)) };
+    const [r, l] = await Promise.all([this.c.from('reservas').select('*'), this.c.from('bloqueos').select('*')]);
+    return { reservas: r.data || [], locks: l.data || [] };
   },
   async lock(f, h) { const { data } = await this.c.rpc('tomar_bloqueo', { p_fecha: f, p_hora: h, p_nombre: S.user.name }); return data === true; },
   release(f, h) { return this.c.rpc('liberar_bloqueo', { p_fecha: f, p_hora: h }); },
@@ -163,7 +167,7 @@ const SB = {
   async confirm(d) {
     const { data, error } = await this.c.rpc('confirmar_reserva', { p: { ...d, vendedor_nombre: S.user.name } });
     if (error) throw new Error(error.code === '23505' ? 'Ese horario acaba de ser apartado por otro vendedor.' :
-      error.message.includes('LOCK_PERDIDO') ? 'El bloqueo expir\u00F3. Vuelve a elegir la fecha.' : error.message);
+      error.message.includes('DIA_LLENO') ? 'Ese d\u00EDa ya tiene 6 horarios apartados.' : error.message.includes('LOCK_PERDIDO') ? 'El bloqueo expir\u00F3. Vuelve a elegir la fecha.' : error.message);
     return data;
   },
   listen(cb) {
@@ -179,7 +183,7 @@ const S = { user: null, reservas: [], locks: [], slots: [], date: null, mine: nu
 S.view.setDate(1);
 
 async function refresh() {
-  const d = await API.load(); S.reservas = d.reservas; S.locks = d.locks; S.slots = d.slots;
+  const d = await API.load(); S.reservas = d.reservas; S.locks = d.locks;
   if (S.mine && S.reservas.some(r => r.fecha === S.mine && hh(r.hora) === S.mineH)) { toast('Ese horario acaba de ser apartado.'); closeForm(false); }
   drawCalendar(); showPanel();
 }
@@ -187,7 +191,7 @@ const hh = h => String(h).slice(0, 5);
 
 /* ============ CALENDARIO ============ */
 function drawCalendar() {
-  const y = S.view.getFullYear(), m = S.view.getMonth(), N = S.slots.length;
+  const y = S.view.getFullYear(), m = S.view.getMonth(), N = CONFIG.MAX_POR_DIA;
   $('#mes').textContent = S.view.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
   const offset = (new Date(y, m, 1).getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
   const now = new Date(); let h = '';
@@ -222,22 +226,27 @@ function showPanel() {
 }
 function drawSlots() {
   const k = S.date, now = new Date();
+  const ocup = [
+    ...S.reservas.filter(r => r.fecha === k).map(r => ({ h: hh(r.hora), t: 'Apartado \u00b7 ' + r.cliente, c: 'book' })),
+    ...S.locks.filter(l => l.fecha === k && l.vendedor_id !== S.user.id && new Date(l.expira_en) > now).map(l => ({ h: hh(l.hora), t: 'En proceso \u00b7 ' + l.vendedor_nombre, c: 'lock' }))
+  ].sort((a, b) => a.h.localeCompare(b.h));
   $('#slotsFecha').textContent = longDate(k);
-  $('#slotsGrid').innerHTML = S.slots.length ? S.slots.map(h => {
-    const res = S.reservas.find(r => r.fecha === k && hh(r.hora) === h);
-    const lk = S.locks.find(l => l.fecha === k && hh(l.hora) === h && l.vendedor_id !== S.user.id && new Date(l.expira_en) > now);
-    const cls = res ? 'book' : lk ? 'lock' : 'free';
-    const note = res ? 'Apartado \u00b7 ' + esc(res.cliente) : lk ? 'En proceso \u00b7 ' + esc(lk.vendedor_nombre) : 'Libre';
-    return `<button class="slot ${cls}" ${cls === 'free' ? '' : 'disabled'} data-h="${h}"><b>${fmtHora(h)}</b><span class="text-xs block truncate">${note}</span></button>`;
-  }).join('') : '<p class="text-sm col-span-2">No hay horarios configurados en la base de datos.</p>';
+  $('#slotsCount').textContent = `${S.reservas.filter(r => r.fecha === k).length} de ${CONFIG.MAX_POR_DIA} horarios apartados`;
+  $('#slotsGrid').innerHTML = ocup.length
+    ? ocup.map(x => `<div class="slot ${x.c}"><b>${fmtHora(x.h)}</b><span class="text-xs block truncate">${esc(x.t)}</span></div>`).join('')
+    : '<p class="text-sm col-span-2 opacity-70">Todo el d\u00eda est\u00e1 libre.</p>';
 }
-$('#slotsGrid').onclick = e => { const b = e.target.closest('.slot:not([disabled])'); if (b) pick(S.date, b.dataset.h); };
+$('#horaOk').onclick = () => {
+  const h = $('#horaSel').value;
+  if (!h) return toast('Elige la hora del evento.');
+  pick(S.date, h);
+};
 
 /* ============ BLOQUEO TEMPORAL (por fecha + hora) ============ */
 async function pick(k, h) {
   if (S.mine) await API.release(S.mine, S.mineH);
   const ok = await API.lock(k, h);
-  if (!ok) { S.mine = null; S.mineH = null; toast('Ese horario ya no est\u00e1 disponible.'); return refresh(); }
+  if (!ok) { S.mine = null; S.mineH = null; toast('Esa hora ya est\u00e1 ocupada o el d\u00eda ya est\u00e1 lleno.'); return refresh(); }
   S.mine = k; S.mineH = h; S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
   $('#form').reset(); $('#fechaTxt').textContent = longDate(k); $('#horaTxt').textContent = fmtHora(h); $('#err').textContent = '';
   clearInterval(S.beat); clearInterval(S.tick);
