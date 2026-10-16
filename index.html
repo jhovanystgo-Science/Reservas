@@ -18,6 +18,12 @@ body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%
 .day.book{background:var(--blush);border-color:#d9a3a8;cursor:not-allowed}
 .day.past{opacity:.35;cursor:not-allowed}
 .day.mine{background:#fff;border:2px solid var(--rose)}
+.day.part{background:#fdf1f1;border-color:#d9a3a8}
+.slot{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;text-align:left}
+.slot b{display:block;font-size:17px}
+.slot:not(:disabled):hover{border-color:var(--rose-d);box-shadow:0 0 0 2px #E36DA133}
+.slot.lock{background:#f8ecd6;border-color:#d9b26f;cursor:not-allowed}
+.slot.book{background:var(--blush);border-color:#d9a3a8;cursor:not-allowed}
 .f label{display:block;font-size:12px;font-weight:600;margin:10px 0 3px}
 .f input,.f select,.f textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;font-size:14px}
 .f input:focus,.f select:focus,.f textarea:focus{outline:2px solid var(--rose-d);outline-offset:1px}
@@ -57,26 +63,27 @@ body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%
     </div>
     <div class="grid grid-cols-7 gap-1.5 text-xs font-semibold opacity-60 mb-1.5 text-center"><span>Lun</span><span>Mar</span><span>Mi&#xE9;</span><span>Jue</span><span>Vie</span><span>S&#xE1;b</span><span>Dom</span></div>
     <div id="grid" class="grid grid-cols-7 gap-1.5"></div>
-    <div class="flex gap-4 text-xs mt-3 opacity-80">
-      <span>&#x2B1C; Libre</span><span>&#x1F7E8; En proceso de apartado</span><span>&#x1F7E5; Apartada</span>
-    </div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs mt-3 opacity-80"><span>&#x2B1C; Libre</span><span>&#x1F7E8; En proceso</span><span>&#x25A8; Con horarios apartados</span><span>&#x1F7E5; D&#xED;a lleno</span></div>
   </section>
 
   <aside class="bg-white rounded-2xl border p-5 h-fit lg:sticky lg:top-5" style="border-color:var(--line)">
     <div id="empty" class="text-sm opacity-70 py-10 text-center">Elige una fecha libre del calendario<br>para empezar el apartado.</div>
+    <div id="slots" class="hidden">
+      <div class="text-xs opacity-60">Fecha del evento</div>
+      <div id="slotsFecha" class="serif text-xl font-bold capitalize"></div>
+      <p class="text-sm mt-2 mb-3">Elige el horario del evento (cada horario se aparta por separado):</p>
+      <div id="slotsGrid" class="grid grid-cols-2 gap-2"></div>
+    </div>
     <form id="form" class="f hidden" autocomplete="off">
       <div class="flex justify-between items-start">
-        <div><div class="text-xs opacity-60">Fecha del evento</div><div id="fechaTxt" class="serif text-xl font-bold capitalize"></div></div>
+        <div><div class="text-xs opacity-60">Fecha del evento</div><div id="fechaTxt" class="serif text-xl font-bold capitalize"></div><div id="horaTxt" class="text-sm font-semibold" style="color:var(--rose)"></div></div>
         <button type="button" id="cancel" class="text-sm underline opacity-70">Cancelar</button>
       </div>
       <p class="text-xs mt-1" style="color:var(--gold)">Fecha bloqueada para ti &#xB7; <span id="timer"></span></p>
       <label>Nombre completo del cliente</label><input name="cliente" required>
       <label>Celular (con c&#xF3;digo de pa&#xED;s)</label><input name="celular" type="tel" placeholder="+52 55 1234 5678" required>
       <label>Lugar o sal&#xF3;n del evento</label><input name="lugar" required>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label>Hora del evento</label><input name="hora" type="time" required></div>
-        <div><label>Invitados</label><input name="invitados" type="number" min="1" required></div>
-      </div>
+      <label>Invitados</label><input name="invitados" type="number" min="1" required>
       <label>Nombre del paquete de postres</label><input name="paquete" required>
       <label>Sabores elegidos</label><textarea name="sabores" rows="2" required></textarea>
       <label>Paleta de colores / tem&#xE1;tica</label><input name="tematica" required>
@@ -147,15 +154,15 @@ const SB = {
     return this.user(data.user);
   },
   async load() {
-    const [r, l] = await Promise.all([this.c.from('reservas').select('*'), this.c.from('bloqueos').select('*')]);
-    return { reservas: r.data || [], locks: l.data || [] };
+    const [r, l, h] = await Promise.all([this.c.from('reservas').select('*'), this.c.from('bloqueos').select('*'), this.c.from('horarios').select('hora').order('hora')]);
+    return { reservas: r.data || [], locks: l.data || [], slots: (h.data || []).map(x => String(x.hora).slice(0, 5)) };
   },
-  async lock(f) { const { data } = await this.c.rpc('tomar_bloqueo', { p_fecha: f, p_nombre: S.user.name }); return data === true; },
-  release(f) { return this.c.rpc('liberar_bloqueo', { p_fecha: f }); },
+  async lock(f, h) { const { data } = await this.c.rpc('tomar_bloqueo', { p_fecha: f, p_hora: h, p_nombre: S.user.name }); return data === true; },
+  release(f, h) { return this.c.rpc('liberar_bloqueo', { p_fecha: f, p_hora: h }); },
   logout() { return this.c.auth.signOut(); },
   async confirm(d) {
     const { data, error } = await this.c.rpc('confirmar_reserva', { p: { ...d, vendedor_nombre: S.user.name } });
-    if (error) throw new Error(error.code === '23505' ? 'Esa fecha acaba de ser apartada por otro vendedor.' :
+    if (error) throw new Error(error.code === '23505' ? 'Ese horario acaba de ser apartado por otro vendedor.' :
       error.message.includes('LOCK_PERDIDO') ? 'El bloqueo expir\u00F3. Vuelve a elegir la fecha.' : error.message);
     return data;
   },
@@ -168,74 +175,98 @@ const SB = {
 
 /* ============ ESTADO ============ */
 const API = SB;
-const S = { user: null, reservas: [], locks: [], mine: null, view: new Date(), beat: null, tick: null };
+const S = { user: null, reservas: [], locks: [], slots: [], date: null, mine: null, mineH: null, view: new Date(), beat: null, tick: null };
 S.view.setDate(1);
 
 async function refresh() {
-  const d = await API.load(); S.reservas = d.reservas; S.locks = d.locks;
-  if (S.mine && S.reservas.some(r => r.fecha === S.mine)) { toast('Esa fecha acaba de ser apartada.'); closeForm(false); }
-  drawCalendar();
+  const d = await API.load(); S.reservas = d.reservas; S.locks = d.locks; S.slots = d.slots;
+  if (S.mine && S.reservas.some(r => r.fecha === S.mine && hh(r.hora) === S.mineH)) { toast('Ese horario acaba de ser apartado.'); closeForm(false); }
+  drawCalendar(); showPanel();
 }
+const hh = h => String(h).slice(0, 5);
 
 /* ============ CALENDARIO ============ */
 function drawCalendar() {
-  const y = S.view.getFullYear(), m = S.view.getMonth();
+  const y = S.view.getFullYear(), m = S.view.getMonth(), N = S.slots.length;
   $('#mes').textContent = S.view.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
   const offset = (new Date(y, m, 1).getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
   const now = new Date(); let h = '';
   for (let i = 0; i < offset; i++) h += '<div></div>';
   for (let d = 1; d <= days; d++) {
-    const k = key(y, m, d), res = S.reservas.find(r => r.fecha === k);
-    const lk = S.locks.find(l => l.fecha === k && new Date(l.expira_en) > now);
+    const k = key(y, m, d), n = S.reservas.filter(r => r.fecha === k).length;
+    const busy = S.locks.some(l => l.fecha === k && l.vendedor_id !== S.user.id && new Date(l.expira_en) > now);
     let cls = 'free', note = '', dis = '';
     if (k < todayKey) { cls = 'past'; dis = 'disabled'; }
-    else if (res) { cls = 'book'; note = `<span class="truncate">${esc(res.cliente)}</span>`; dis = 'disabled'; }
-    else if (lk && lk.vendedor_id === S.user.id) { cls = 'mine'; note = '<span style="color:var(--rose)">Tu apartado</span>'; dis = 'disabled'; }
-    else if (lk) { cls = 'lock'; note = `<span class="truncate">En proceso \u00B7 ${esc(lk.vendedor_nombre)}</span>`; dis = 'disabled'; }
-    h += `<button class="day ${cls}" ${dis} data-k="${k}"><b>${d}</b>${note}</button>`;
+    else if (N && n >= N) { cls = 'book'; note = 'D\u00eda lleno'; dis = 'disabled'; }
+    else {
+      cls = (S.date === k) ? 'mine' : n ? 'part' : 'free';
+      note = n ? `${n} de ${N} apartados` : '';
+      if (busy) note += (note ? ' \u00b7 ' : '') + 'en proceso';
+    }
+    h += `<button class="day ${cls}" ${dis} data-k="${k}"><b>${d}</b><span class="truncate">${note}</span></button>`;
   }
   $('#grid').innerHTML = h;
 }
-$('#grid').onclick = e => { const b = e.target.closest('.day.free'); if (b) pick(b.dataset.k); };
+$('#grid').onclick = e => { const b = e.target.closest('.day:not([disabled])'); if (b) selectDate(b.dataset.k); };
 $('#prev').onclick = () => { S.view.setMonth(S.view.getMonth() - 1); drawCalendar(); };
 $('#next').onclick = () => { S.view.setMonth(S.view.getMonth() + 1); drawCalendar(); };
 
-/* ============ BLOQUEO TEMPORAL ============ */
-async function pick(k) {
-  if (S.mine) await API.release(S.mine);
-  const ok = await API.lock(k);
-  if (!ok) { S.mine = null; toast('Esa fecha ya no est\u00E1 disponible.'); return refresh(); }
-  S.mine = k; S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
-  $('#empty').classList.add('hidden'); $('#form').classList.remove('hidden'); $('#form').reset();
-  $('#fechaTxt').textContent = longDate(k); $('#err').textContent = '';
+/* ============ SELECTOR DE HORARIOS ============ */
+async function selectDate(k) { if (S.mine) await closeForm(true); S.date = k; drawCalendar(); showPanel(); }
+function showPanel() {
+  const form = !!S.mine, slots = !form && !!S.date;
+  $('#empty').classList.toggle('hidden', form || slots);
+  $('#form').classList.toggle('hidden', !form);
+  $('#slots').classList.toggle('hidden', !slots);
+  if (slots) drawSlots();
+}
+function drawSlots() {
+  const k = S.date, now = new Date();
+  $('#slotsFecha').textContent = longDate(k);
+  $('#slotsGrid').innerHTML = S.slots.length ? S.slots.map(h => {
+    const res = S.reservas.find(r => r.fecha === k && hh(r.hora) === h);
+    const lk = S.locks.find(l => l.fecha === k && hh(l.hora) === h && l.vendedor_id !== S.user.id && new Date(l.expira_en) > now);
+    const cls = res ? 'book' : lk ? 'lock' : 'free';
+    const note = res ? 'Apartado \u00b7 ' + esc(res.cliente) : lk ? 'En proceso \u00b7 ' + esc(lk.vendedor_nombre) : 'Libre';
+    return `<button class="slot ${cls}" ${cls === 'free' ? '' : 'disabled'} data-h="${h}"><b>${fmtHora(h)}</b><span class="text-xs block truncate">${note}</span></button>`;
+  }).join('') : '<p class="text-sm col-span-2">No hay horarios configurados en la base de datos.</p>';
+}
+$('#slotsGrid').onclick = e => { const b = e.target.closest('.slot:not([disabled])'); if (b) pick(S.date, b.dataset.h); };
+
+/* ============ BLOQUEO TEMPORAL (por fecha + hora) ============ */
+async function pick(k, h) {
+  if (S.mine) await API.release(S.mine, S.mineH);
+  const ok = await API.lock(k, h);
+  if (!ok) { S.mine = null; S.mineH = null; toast('Ese horario ya no est\u00e1 disponible.'); return refresh(); }
+  S.mine = k; S.mineH = h; S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
+  $('#form').reset(); $('#fechaTxt').textContent = longDate(k); $('#horaTxt').textContent = fmtHora(h); $('#err').textContent = '';
   clearInterval(S.beat); clearInterval(S.tick);
   S.beat = setInterval(async () => {            // renueva el bloqueo mientras el formulario este abierto
     if (!S.mine) return;
-    if (await API.lock(S.mine)) S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
-    else { toast('Perdiste el bloqueo de la fecha.'); closeForm(false); refresh(); }
+    if (await API.lock(S.mine, S.mineH)) S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
+    else { toast('Perdiste el bloqueo del horario.'); closeForm(false); }
   }, 60000);
   S.tick = setInterval(() => { const s = Math.max(0, Math.round((S.exp - Date.now()) / 1000)); $('#timer').textContent = `bloqueo vigente ${Math.floor(s / 60)}:${pad(s % 60)}`; }, 1000);
   refresh();
 }
 async function closeForm(release = true) {
   clearInterval(S.beat); clearInterval(S.tick);
-  if (release && S.mine) await API.release(S.mine);
-  S.mine = null; $('#form').classList.add('hidden'); $('#empty').classList.remove('hidden'); refresh();
+  if (release && S.mine) await API.release(S.mine, S.mineH);
+  S.mine = null; S.mineH = null; refresh();
 }
 $('#cancel').onclick = () => closeForm(true);
-addEventListener('beforeunload', () => { if (S.mine) API.release(S.mine); });
+addEventListener('beforeunload', () => { if (S.mine) API.release(S.mine, S.mineH); });
 
 /* ============ CONFIRMAR ============ */
 $('#form').onsubmit = async e => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target));
-  f.fecha = S.mine; f.celular = normPhone(f.celular);
+  f.fecha = S.mine; f.hora = S.mineH; f.celular = normPhone(f.celular);
   if (f.celular.length < 11) { $('#err').textContent = 'Revisa el celular: incluye c\u00F3digo de pa\u00EDs.'; return; }
   $('#ok').disabled = true;
   try {
     const row = await API.confirm(f);
-    clearInterval(S.beat); clearInterval(S.tick); S.mine = null;
-    $('#form').classList.add('hidden'); $('#empty').classList.remove('hidden');
+    clearInterval(S.beat); clearInterval(S.tick); S.mine = null; S.mineH = null; S.date = null;
     showNota(row); refresh();
   } catch (er) { $('#err').textContent = er.message; refresh(); }
   $('#ok').disabled = false;
@@ -291,7 +322,7 @@ function showNota(r) {
   $('#notaWrap').classList.remove('hidden');
 }
 $('#print').onclick = () => print();
-$('#logout').onclick = async () => { if (S.mine) await API.release(S.mine); await API.logout(); location.reload(); };
+$('#logout').onclick = async () => { if (S.mine) await API.release(S.mine, S.mineH); await API.logout(); location.reload(); };
 $('#copy').onclick = async () => {
   try { await navigator.clipboard.writeText(S.msg); }
   catch (e) { const t = document.createElement('textarea'); t.value = S.msg; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); }
@@ -308,7 +339,7 @@ function toast(t) {
 async function start(u) {
   S.user = u; $('#login').classList.add('hidden'); $('#who').textContent = u.name;
   await refresh(); API.listen(refresh);
-  setInterval(drawCalendar, 15000); // los bloqueos vencidos se liberan visualmente
+  setInterval(() => { drawCalendar(); showPanel(); }, 15000); // los bloqueos vencidos se liberan visualmente
 }
 $('#loginForm').onsubmit = async e => {
   e.preventDefault();
