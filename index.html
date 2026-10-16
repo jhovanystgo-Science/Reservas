@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--bg:#fbf5ee;--bg2:#f4e6e1;--card:#fffdf9;--ink:#472317;--soft:#8a6f66;--blush:#ECC7C6;--rose-d:#E36DA1;--rose:#AB2270;--gold:#A67236;--line:#ecdcd0}
 body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%,var(--bg2),var(--bg) 60%) fixed;color:var(--ink)}
@@ -30,7 +31,11 @@ body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%
 .btn{border-radius:10px;padding:11px 16px;font-weight:600;font-size:14px}
 .pri{background:var(--ink);color:#fff}.pri:hover{background:var(--rose)}
 .wa{background:#1fa855;color:#fff}
-@media print{body>*:not(#notaWrap){display:none!important}#notaWrap{position:static;background:#fff}.noprint{display:none!important}}
+.tab{padding:8px 16px;border-radius:10px;font-weight:600;font-size:14px;border:1px solid var(--line);background:#fff}.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.tbl th{text-align:left;padding:8px 10px;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;background:var(--bg2)}
+.tbl td{padding:7px 10px;border-top:1px solid var(--line);white-space:nowrap}.tbl tbody tr:hover td{background:#fdf6f6}
+.printonly{display:none}
+@media print{body:not([data-print])>*:not(#notaWrap){display:none!important}body[data-print=pedidos]>*:not(#pedidos){display:none!important}body[data-print=pedidos] #pedidos{display:block!important}#notaWrap{position:static;background:#fff}.noprint{display:none!important}.printonly{display:block}#pedidos .tbl{font-size:9px}#pedidos .tbl th,#pedidos .tbl td{padding:3px 5px}#pedidos .tbl td{white-space:normal}}
 </style>
 </head>
 <body>
@@ -53,6 +58,7 @@ body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%
   <div class="flex items-center gap-3"><img data-logo alt="Le Tulipe" class="h-14 sm:h-[72px]"><span class="hidden sm:inline text-sm opacity-70 border-l pl-3" style="border-color:var(--line)">Apartado de fechas &#xB7; Mesas de Postres</span></div>
   <div class="text-sm flex flex-wrap items-center justify-end gap-x-3 gap-y-1"><span id="who" class="font-semibold"></span> <span id="live" class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">en vivo</span> <button id="logout" class="text-xs border rounded-md px-2.5 py-1 bg-white" style="border-color:var(--line)">Cerrar sesi&#xF3;n</button></div>
 </header>
+<nav id="tabs" class="hidden noprint"><div class="flex gap-2 px-4 sm:px-5 pt-3 max-w-[1400px] mx-auto"><button class="tab on" data-v="cal">Calendario</button><button class="tab" data-v="ped">Pedidos</button></div></nav>
 
 <main class="grid lg:grid-cols-[1.25fr_1fr] gap-5 p-5 max-w-6xl mx-auto">
   <section>
@@ -100,6 +106,26 @@ body{font-family:Jost,sans-serif;background:radial-gradient(120% 60% at 50% -10%
     </form>
   </aside>
 </main>
+
+<section id="pedidos" class="hidden max-w-[1400px] mx-auto p-4 sm:p-5">
+  <h2 id="pHead" class="printonly serif text-xl font-bold mb-2"></h2>
+  <div class="noprint f grid gap-3 sm:grid-cols-2 lg:grid-cols-6 items-end mb-3 bg-white border rounded-2xl p-4" style="border-color:var(--line)">
+    <div class="lg:col-span-2"><label>Buscar</label><input id="fQ" placeholder="Cliente, celular, lugar, paquete, folio..."></div>
+    <div><label>Evento desde</label><input id="fDesde" type="date"></div>
+    <div><label>Evento hasta</label><input id="fHasta" type="date"></div>
+    <div><label>M&#xE9;todo de pago</label><select id="fPago"><option value="">Todos</option><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Ninguno</option></select></div>
+    <div><label>Vendedor</label><select id="fVend"><option value="">Todos</option></select></div>
+  </div>
+  <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+    <div id="pTotal" class="text-sm font-semibold"></div>
+    <div class="noprint flex flex-wrap gap-2">
+      <button id="pLimpiar" class="btn bg-white border" style="border-color:var(--line)">Limpiar filtros</button>
+      <button id="pXls" class="btn wa">Descargar Excel</button>
+      <button id="pPrint" class="btn pri">Imprimir</button>
+    </div>
+  </div>
+  <div class="overflow-x-auto bg-white border rounded-2xl" style="border-color:var(--line)"><table id="pTable" class="tbl w-full text-sm"></table></div>
+</section>
 
 <footer class="noprint text-center text-xs opacity-60 px-4 py-6">&copy; <span class="yr"></span> Le Tulipe. Todos los derechos reservados &middot; Desarrollado por <strong>Syntavor</strong></footer>
 
@@ -158,12 +184,14 @@ const SB = {
     return this.user(data.user);
   },
   async load() {
-    const [r, l] = await Promise.all([this.c.from('reservas').select('*'), this.c.from('bloqueos').select('*')]);
+    const [r, l] = await Promise.all([this.c.from('ocupacion').select('*'), this.c.from('bloqueos').select('*')]);
     return { reservas: r.data || [], locks: l.data || [] };
   },
-  async lock(f, h) { const { data } = await this.c.rpc('tomar_bloqueo', { p_fecha: f, p_hora: h, p_nombre: S.user.name }); return data === true; },
+  async lock(f, h) { const { data, error } = await this.c.rpc('tomar_bloqueo', { p_fecha: f, p_hora: h, p_nombre: S.user.name }); if (error) throw error; return data === true; },
   release(f, h) { return this.c.rpc('liberar_bloqueo', { p_fecha: f, p_hora: h }); },
   logout() { return this.c.auth.signOut(); },
+  async esAdmin() { const { data } = await this.c.rpc('es_admin'); return data === true; },
+  async pedidos() { const { data } = await this.c.from('reservas').select('*').order('fecha').order('hora'); return data || []; },
   async confirm(d) {
     const { data, error } = await this.c.rpc('confirmar_reserva', { p: { ...d, vendedor_nombre: S.user.name } });
     if (error) throw new Error(error.code === '23505' ? 'Ese horario acaba de ser apartado por otro vendedor.' :
@@ -172,7 +200,7 @@ const SB = {
   },
   listen(cb) {
     const ch = this.c.channel('mp');
-    ['reservas', 'bloqueos'].forEach(t => ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, cb));
+    ['ocupacion', 'bloqueos'].forEach(t => ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, cb));
     ch.subscribe(st => { $('#live').textContent = st === 'SUBSCRIBED' ? 'en vivo' : 'reconectando\u2026'; });
   }
 };
@@ -245,15 +273,19 @@ $('#horaOk').onclick = () => {
 /* ============ BLOQUEO TEMPORAL (por fecha + hora) ============ */
 async function pick(k, h) {
   if (S.mine) await API.release(S.mine, S.mineH);
-  const ok = await API.lock(k, h);
+  let ok = false;
+  try { ok = await API.lock(k, h); }
+  catch (e) { S.mine = null; S.mineH = null; toast('No se pudo bloquear: ' + (e.message || e.code)); return refresh(); }
   if (!ok) { S.mine = null; S.mineH = null; toast('Esa hora ya est\u00e1 ocupada o el d\u00eda ya est\u00e1 lleno.'); return refresh(); }
   S.mine = k; S.mineH = h; S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
   $('#form').reset(); $('#fechaTxt').textContent = longDate(k); $('#horaTxt').textContent = fmtHora(h); $('#err').textContent = '';
   clearInterval(S.beat); clearInterval(S.tick);
   S.beat = setInterval(async () => {            // renueva el bloqueo mientras el formulario este abierto
     if (!S.mine) return;
-    if (await API.lock(S.mine, S.mineH)) S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
-    else { toast('Perdiste el bloqueo del horario.'); closeForm(false); }
+    try {
+      if (await API.lock(S.mine, S.mineH)) S.exp = Date.now() + CONFIG.LOCK_MIN * 60000;
+      else { toast('Perdiste el bloqueo del horario.'); closeForm(false); }
+    } catch (e) { /* sin conexion: se reintenta en el siguiente ciclo */ }
   }, 60000);
   S.tick = setInterval(() => { const s = Math.max(0, Math.round((S.exp - Date.now()) / 1000)); $('#timer').textContent = `bloqueo vigente ${Math.floor(s / 60)}:${pad(s % 60)}`; }, 1000);
   refresh();
@@ -339,6 +371,81 @@ $('#copy').onclick = async () => {
 };
 $('#again').onclick = () => $('#notaWrap').classList.add('hidden');
 
+/* ============ PEDIDOS (solo administradores) ============ */
+const fdate = k => parseKey(k).toLocaleDateString('es-MX');
+const COLS = [
+  { k: 'folio', t: 'Folio', v: r => String(r.folio).padStart(4, '0') },
+  { k: 'fecha', t: 'Fecha', v: r => fdate(r.fecha) },
+  { k: 'hora', t: 'Hora', v: r => fmtHora(r.hora) },
+  { k: 'cliente', t: 'Cliente', v: r => r.cliente },
+  { k: 'celular', t: 'Celular', v: r => '+' + r.celular },
+  { k: 'lugar', t: 'Lugar', v: r => r.lugar },
+  { k: 'invitados', t: 'Invitados', v: r => r.invitados },
+  { k: 'paquete', t: 'Paquete', v: r => r.paquete },
+  { k: 'sabores', t: 'Sabores', v: r => r.sabores },
+  { k: 'tematica', t: 'Tem\u00E1tica', v: r => r.tematica },
+  { k: 'anticipo', t: 'Anticipo', v: r => money(r.anticipo), x: r => Number(r.anticipo) },
+  { k: 'metodo_pago', t: 'Pago', v: r => r.metodo_pago },
+  { k: 'correo', t: 'Correo', v: r => r.correo || '' },
+  { k: 'vendedor_nombre', t: 'Vendedor', v: r => r.vendedor_nombre },
+  { k: 'creado_en', t: 'Registrado', v: r => new Date(r.creado_en).toLocaleString('es-MX') }
+];
+const P = { rows: [], k: 'fecha', d: 1 };
+const FIL = ['fQ', 'fDesde', 'fHasta', 'fPago', 'fVend'];
+
+function showView(v) {
+  const ped = v === 'ped' && S.admin;
+  $('main').classList.toggle('hidden', ped); $('#pedidos').classList.toggle('hidden', !ped);
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.v === (ped ? 'ped' : 'cal')));
+  if (ped) loadPedidos();
+}
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => showView(b.dataset.v));
+
+async function loadPedidos() {
+  P.rows = await API.pedidos();
+  const sel = $('#fVend'), cur = sel.value;
+  sel.innerHTML = '<option value="">Todos</option>' + [...new Set(P.rows.map(r => r.vendedor_nombre))].sort().map(n => `<option>${esc(n)}</option>`).join('');
+  sel.value = cur; drawPedidos();
+}
+function filtered() {
+  const q = $('#fQ').value.trim().toLowerCase(), d1 = $('#fDesde').value, d2 = $('#fHasta').value, mp = $('#fPago').value, v = $('#fVend').value;
+  const kv = r => P.k === 'fecha' ? r.fecha + r.hora : r[P.k];
+  return P.rows.filter(r => (!q || [r.folio, r.cliente, r.celular, r.lugar, r.paquete, r.sabores, r.tematica, r.correo].join(' ').toLowerCase().includes(q))
+      && (!d1 || r.fecha >= d1) && (!d2 || r.fecha <= d2) && (!mp || r.metodo_pago === mp) && (!v || r.vendedor_nombre === v))
+    .sort((a, b) => { const x = kv(a), y = kv(b); return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'es')) * P.d; });
+}
+function drawPedidos() {
+  const rows = filtered(), sum = rows.reduce((s, r) => s + Number(r.anticipo), 0);
+  $('#pTable').innerHTML = '<thead><tr>' + COLS.map(c => `<th data-k="${c.k}">${c.t}${P.k === c.k ? (P.d > 0 ? ' \u25B2' : ' \u25BC') : ''}</th>`).join('') + '</tr></thead><tbody>'
+    + (rows.length ? rows.map(r => '<tr>' + COLS.map(c => `<td>${esc(c.v(r))}</td>`).join('') + '</tr>').join('')
+                   : `<tr><td colspan="${COLS.length}" class="text-center py-6 opacity-60">Sin pedidos con estos filtros.</td></tr>`) + '</tbody>';
+  $('#pTotal').textContent = `${rows.length} pedido${rows.length === 1 ? '' : 's'} \u00B7 Anticipos: ${money(sum)}`;
+  $('#pHead').textContent = `Pedidos apartados \u00B7 ${CONFIG.BRAND} \u00B7 ${new Date().toLocaleDateString('es-MX')}`;
+}
+$('#pTable').onclick = e => { const th = e.target.closest('th'); if (!th) return; P.d = P.k === th.dataset.k ? -P.d : 1; P.k = th.dataset.k; drawPedidos(); };
+FIL.forEach(id => $('#' + id).oninput = drawPedidos);
+$('#pLimpiar').onclick = () => { FIL.forEach(id => $('#' + id).value = ''); drawPedidos(); };
+
+function excel() {
+  const rows = filtered(), head = COLS.map(c => c.t), name = `pedidos_${todayKey}`;
+  const data = rows.map(r => COLS.map(c => c.x ? c.x(r) : c.v(r)));
+  if (window.XLSX) {
+    const ws = XLSX.utils.aoa_to_sheet([head, ...data]);
+    ws['!cols'] = head.map((t, i) => ({ wch: Math.min(40, Math.max(t.length, ...data.map(r => String(r[i]).length)) + 2) }));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Pedidos'); XLSX.writeFile(wb, name + '.xlsx');
+  } else {   // respaldo si no cargo la libreria: CSV que Excel abre con acentos
+    const csv = '\uFEFF' + [head, ...data].map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = name + '.csv'; a.click();
+  }
+}
+function printPedidos() {
+  const st = document.createElement('style'); st.textContent = '@page{size:landscape;margin:10mm}';
+  document.head.append(st); document.body.dataset.print = 'pedidos';
+  const done = () => { delete document.body.dataset.print; st.remove(); removeEventListener('afterprint', done); };
+  addEventListener('afterprint', done); print();
+}
+$('#pXls').onclick = excel; $('#pPrint').onclick = printPedidos;
+
 /* ============ UTILIDADES + ARRANQUE ============ */
 function toast(t) {
   const d = document.createElement('div'); d.textContent = t;
@@ -347,7 +454,9 @@ function toast(t) {
 }
 async function start(u) {
   S.user = u; $('#login').classList.add('hidden'); $('#who').textContent = u.name;
-  await refresh(); API.listen(refresh);
+  await refresh();
+  S.admin = await API.esAdmin(); $('#tabs').classList.toggle('hidden', !S.admin); showView('cal');
+  API.listen(() => { refresh(); if (S.admin && !$('#pedidos').classList.contains('hidden')) loadPedidos(); });
   setInterval(() => { drawCalendar(); showPanel(); }, 15000); // los bloqueos vencidos se liberan visualmente
 }
 $('#loginForm').onsubmit = async e => {
